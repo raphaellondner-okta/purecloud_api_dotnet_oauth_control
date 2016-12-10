@@ -13,6 +13,7 @@ namespace ININ.PureCloud.OAuthControl
         #region Private Members
 
         private string _accessToken;
+        private string _idToken;
 
         #endregion
 
@@ -64,6 +65,32 @@ namespace ININ.PureCloud.OAuthControl
         /// The number of seconds in which the token expires. This will be 0 if the value is unknown.
         /// </summary>
         public int TokenExpiresInSeconds { get; private set; }
+
+        /// <summary>
+        /// The OpenID Connect scopes requested by the client
+        /// </summary>
+        public string Scopes { get; set; }
+
+
+        /// <summary>
+        /// The response_type parameter for the OIDC authorization call ("id_token", "token" or "id_token token")
+        /// </summary>
+        public string ResponseType { get; set; }
+
+        /// <summary>
+        /// The ID Token returned after authenticating.
+        /// </summary>
+        public string IDToken
+        {
+            get { return _idToken; }
+            private set
+            {
+                if (value == _idToken) return;
+
+                _idToken = value;
+                RaiseAuthenticated(IDToken);
+            }
+        }
 
         public delegate void ExceptionEncounteredDelegate(string source, Exception ex);
 
@@ -142,6 +169,11 @@ namespace ININ.PureCloud.OAuthControl
                         AccessToken = fragment["access_token"];
                         if (RedirectUriIsFake) Visible = false;
                     }
+                    if (fragment.AllKeys.Contains("id_token"))
+                    {
+                        IDToken = fragment["id_token"];
+                        if (RedirectUriIsFake) Visible = false;
+                    }
                 }
             }
             catch (Exception ex)
@@ -160,13 +192,20 @@ namespace ININ.PureCloud.OAuthControl
         /// <summary>
         /// Initiates the Implicit Grant OAuth flow
         /// </summary>
-        public void BeginImplicitGrant()
+        /// <param name="bUseOkta">Use to craft an Okta-compatible Authorize url</param>
+        public void BeginImplicitGrant(bool bUseOkta = false)
         {
             // Clear existing token
             AccessToken = "";
 
+            string strAuthorizeUrl = $"https:\\\\login.{Environment}/authorize?client_id={ClientId}&response_type=token&redirect_uri={RedirectUri}";
+            if (bUseOkta)
+            {
+                strAuthorizeUrl = $"https:\\\\{Environment}/oauth2/v1/authorize?client_id={ClientId}&response_type={ResponseType}&redirect_uri={RedirectUri}&scope={Scopes}&response_mode=fragment&state=ThisShouldBeADynamicState&nonce=ThisShouldBeADynamicNonce";
+            }
+
             // Navigate to the login URL
-            this.Navigate($"https:\\\\login.{Environment}/authorize?client_id={ClientId}&response_type=token&redirect_uri={RedirectUri}");
+            this.Navigate(strAuthorizeUrl);
         }
 
         #endregion

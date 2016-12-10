@@ -12,6 +12,12 @@ namespace ININ.PureCloud.OAuthControl
             oAuthWebBrowser1.Authenticated += OAuthWebBrowser1OnAuthenticated;
         }
 
+        public OAuthWebBrowserForm(string strWindowTitle) : this()
+        {
+            this.Text = strWindowTitle;
+        }
+
+
         private void OAuthWebBrowser1OnAuthenticated(string accessToken)
         {
             try
@@ -26,7 +32,7 @@ namespace ININ.PureCloud.OAuthControl
             }
         }
 
-        private DialogResult ShowImpl(bool dialog, IWin32Window owner = null)
+        private DialogResult ShowImpl(bool dialog, IWin32Window owner = null, bool bUseOkta = false)
         {
             try
             {
@@ -37,7 +43,7 @@ namespace ININ.PureCloud.OAuthControl
                     throw new OAuthSettingsValidationException("RedirectUri");
 
                 // Navigate the browser (can't do this after ShowDialog has been called)
-                oAuthWebBrowser1.BeginImplicitGrant();
+                oAuthWebBrowser1.BeginImplicitGrant(bUseOkta);
 
                 // Open window
                 if (dialog)
@@ -58,6 +64,11 @@ namespace ININ.PureCloud.OAuthControl
         public new DialogResult ShowDialog()
         {
             return ShowImpl(true);
+        }
+
+        public DialogResult ShowDialog(bool bUseOkta)
+        {
+            return ShowImpl(true, null, bUseOkta);
         }
 
         public new DialogResult ShowDialog(IWin32Window owner)
