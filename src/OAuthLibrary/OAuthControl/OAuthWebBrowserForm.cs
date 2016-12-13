@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace ININ.PureCloud.OAuthControl
@@ -32,6 +33,40 @@ namespace ININ.PureCloud.OAuthControl
             }
         }
 
+        private async Task<DialogResult> ShowImplAsync(bool dialog, IWin32Window owner = null, bool bUseOkta = false)
+        {
+
+            //try
+            //{
+            //    // Validate settings have been set
+            //    if (string.IsNullOrEmpty(oAuthWebBrowser1.ClientId))
+            //        throw new OAuthSettingsValidationException("ClientId");
+            //    if (string.IsNullOrEmpty(oAuthWebBrowser1.RedirectUri))
+            //        throw new OAuthSettingsValidationException("RedirectUri");
+
+
+            //    // Navigate the browser (can't do this after ShowDialog has been called)
+            //    oAuthWebBrowser1.BeginImplicitGrant(bUseOkta);
+
+            //    // Open window
+            //    if (dialog)
+            //        base.ShowDialog(owner);
+            //    else
+            //        base.Show(owner);
+
+            //    // Return result based on if we got an access token
+            //    return string.IsNullOrEmpty(oAuthWebBrowser1.AccessToken) ? DialogResult.Cancel : DialogResult.OK;
+            //}
+            //catch (Exception ex)
+            //{
+            //    Console.WriteLine(ex);
+            //    throw ex;
+            //}
+            DialogResult dialogResult = ShowImpl(dialog, owner, bUseOkta);
+
+            return dialogResult;
+        }
+
         private DialogResult ShowImpl(bool dialog, IWin32Window owner = null, bool bUseOkta = false)
         {
             try
@@ -42,6 +77,7 @@ namespace ININ.PureCloud.OAuthControl
                 if (string.IsNullOrEmpty(oAuthWebBrowser1.RedirectUri))
                     throw new OAuthSettingsValidationException("RedirectUri");
 
+                
                 // Navigate the browser (can't do this after ShowDialog has been called)
                 oAuthWebBrowser1.BeginImplicitGrant(bUseOkta);
 
@@ -69,6 +105,11 @@ namespace ININ.PureCloud.OAuthControl
         public DialogResult ShowDialog(bool bUseOkta)
         {
             return ShowImpl(true, null, bUseOkta);
+        }
+
+        public async Task<DialogResult> ShowDialogAsync(bool bUseOkta)
+        {
+            return await ShowImplAsync(true, null, bUseOkta);
         }
 
         public new DialogResult ShowDialog(IWin32Window owner)

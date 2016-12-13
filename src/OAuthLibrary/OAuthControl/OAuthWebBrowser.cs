@@ -5,24 +5,28 @@ using System.Web;
 using System.Windows.Forms;
 using RestSharp;
 using RestSharp.Authenticators;
+using System.Collections.Generic;
+using System.Security.Claims;
+using System.IdentityModel.Tokens;
+using System.Security.Cryptography.X509Certificates;
+using Microsoft.IdentityModel.Protocols;
+using System.Threading.Tasks;
 
 namespace ININ.PureCloud.OAuthControl
 {
     public class OAuthWebBrowser : WebBrowser
     {
         #region Private Members
-
         private string _accessToken;
         private string _idToken;
-
+        private OpenIdConnectConfiguration _config;
         #endregion
-
-
 
         #region Public Members
 
         /// <summary>
         /// Use a static property from PureCloudEnvironment to set the environment
+        /// If used with Okta, set to the sub-domain of your Okta organization (e.g. "company.okta.com" if your Okta organization url is "https://company.okta.com")
         /// </summary>
         public string Environment { get; set; }
 
@@ -32,7 +36,7 @@ namespace ININ.PureCloud.OAuthControl
         public string RedirectUri { get; set; }
 
         /// <summary>
-        /// [True] if the redirect URI does not resolve. Setting this to true will hide the control when the redirect URI is encountered.1
+        /// [True] if the redirect URI does not resolve. Setting this to true will hide the control when the redirect URI is encountered.
         /// </summary>
         public bool RedirectUriIsFake { get; set; }
 
@@ -45,6 +49,16 @@ namespace ININ.PureCloud.OAuthControl
         /// The OAuth Client Secret. Only used with an authorization code grant.
         /// </summary>
         public string ClientSecret { get; set; }
+
+        /// <summary>
+        /// Dynamic value that should be identical to the one available in the authorize response (as fragment) 
+        /// </summary>
+        public string State { get; set; }
+
+        /// <summary>
+        /// Dynamic value that should be identical to the one available in the returned ID token
+        /// </summary>
+        public string Nonce { get; set; }
 
         /// <summary>
         /// The Access Token returned after authenticating.
@@ -71,7 +85,6 @@ namespace ININ.PureCloud.OAuthControl
         /// </summary>
         public string Scopes { get; set; }
 
-
         /// <summary>
         /// The response_type parameter for the OIDC authorization call ("id_token", "token" or "id_token token")
         /// </summary>
@@ -92,6 +105,10 @@ namespace ININ.PureCloud.OAuthControl
             }
         }
 
+        public List<Claim> IDClaims { get; private set; }
+
+        public OpenIdConnectConfiguration OpenIdConfig { get; set; }
+
         public delegate void ExceptionEncounteredDelegate(string source, Exception ex);
 
         public delegate void AuthenticatedDelegate(string accessToken);
@@ -108,18 +125,15 @@ namespace ININ.PureCloud.OAuthControl
 
         #endregion
 
-
-
         public OAuthWebBrowser()
         {
             RedirectUriIsFake = false;
             Environment = "mypurecloud.com";
-            
+
             this.Navigated += OnNavigated;
         }
 
         #region Private Methods
-
         private void RaiseExceptionEncountered(string source, Exception ex)
         {
             ExceptionEncountered?.Invoke(source, ex);
@@ -128,6 +142,22 @@ namespace ININ.PureCloud.OAuthControl
         private void RaiseAuthenticated(string accessToken)
         {
             Authenticated?.Invoke(accessToken);
+        }
+
+        /// <summary>
+        /// Loads the OpendID Configuration from the Okta endpoint
+        /// </summary>
+        /// <returns></returns>
+        internal async Task<OpenIdConnectConfiguration> LoadOpenIdConnectConfigurationAsync()
+        {
+            if (_config == null)
+            {
+                var discoAddress = "https://" + Environment + "/.well-known/openid-configuration";
+
+                var manager = new ConfigurationManager<OpenIdConnectConfiguration>(discoAddress);
+                _config = await manager.GetConfigurationAsync();
+            }
+            return _config;
         }
 
         private void OnNavigated(object sender, WebBrowserNavigatedEventArgs args)
@@ -154,9 +184,20 @@ namespace ININ.PureCloud.OAuthControl
                 // Process our redirect URL
                 if (args.Url.ToString().ToLowerInvariant().StartsWith(RedirectUri.ToLowerInvariant()))
                 {
-                    var queryString = HttpUtility.ParseQueryString(args.Url.Query);
+                    //var queryString = HttpUtility.ParseQueryString(args.Url.Query);
 
                     var fragment = HttpUtility.ParseQueryString(args.Url.Fragment.TrimStart('#'));
+                    
+                    //OIDC state validation
+                    if (fragment.AllKeys.Contains("state"))
+                    {
+                        if (fragment["state"] != State)
+                        {
+                            //if we have the wrong state from the response, let's stop processing anything else
+                            return;
+                        }
+                    }
+
                     // Get the token from the redirect URI (implicit grant)
                     if (fragment.AllKeys.Contains("expires_in"))
                     {
@@ -181,13 +222,58 @@ namespace ININ.PureCloud.OAuthControl
                 Console.WriteLine(ex);
                 RaiseExceptionEncountered("OAuthWebBrowser.OnNavigated", ex);
             }
-        }
 
+            if (ResponseType.Contains("id_token") && !string.IsNullOrEmpty(IDToken))
+            {
+                var idClaims = ValidateIdentityToken(IDToken); 
+
+                if (idClaims != null)
+                {
+                    //OIDC nonce validation
+                    var nonce = idClaims.FirstOrDefault(c => c.Type == "nonce");
+
+                    if (nonce != null && string.Equals(nonce.Value, Nonce, StringComparison.Ordinal))
+                    {
+                        //we only set the IDClaims property if the nonce is valid
+                        IDClaims = idClaims;
+                    }
+                }
+            }
+        }
+        /// <summary>
+        /// Performs audience, issuer and signing key OpenID Connect validation
+        /// </summary>
+        /// <param name="identityToken">OpenID Connect ID Token</param>
+        /// <returns>the list of claims extracted from the ID Token</returns>
+        private List<Claim> ValidateIdentityToken(string identityToken)
+        {
+            var tokens = OpenIdConfig.SigningTokens;
+
+            var parameter = new TokenValidationParameters
+            {
+                ValidIssuer = OpenIdConfig.Issuer,
+                ValidAudience = this.ClientId,
+                ValidateIssuerSigningKey = true,
+                IssuerSigningTokens = tokens
+            };
+
+            JwtSecurityTokenHandler.InboundClaimTypeMap.Clear();
+            var handler = new JwtSecurityTokenHandler();
+
+            SecurityToken token;
+            try
+            {
+                return handler.ValidateToken(identityToken, parameter, out token).Claims.ToList();
+            }
+            catch
+            {
+                return null;
+            }
+        }
         #endregion
 
-
-
         #region Public Methods
+
 
         /// <summary>
         /// Initiates the Implicit Grant OAuth flow
@@ -201,7 +287,7 @@ namespace ININ.PureCloud.OAuthControl
             string strAuthorizeUrl = $"https:\\\\login.{Environment}/authorize?client_id={ClientId}&response_type=token&redirect_uri={RedirectUri}";
             if (bUseOkta)
             {
-                strAuthorizeUrl = $"https:\\\\{Environment}/oauth2/v1/authorize?client_id={ClientId}&response_type={ResponseType}&redirect_uri={RedirectUri}&scope={Scopes}&response_mode=fragment&state=ThisShouldBeADynamicState&nonce=ThisShouldBeADynamicNonce";
+                strAuthorizeUrl = $"https:\\\\{Environment}/oauth2/v1/authorize?client_id={ClientId}&response_type={ResponseType}&redirect_uri={RedirectUri}&scope={Scopes}&response_mode=fragment&state={State}&nonce={Nonce}";
             }
 
             // Navigate to the login URL
